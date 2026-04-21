@@ -1,45 +1,42 @@
 import type { StockQuote, WatchlistItem } from "@/types/stock";
 
-interface YahooMeta {
-  regularMarketPrice: number;
-  chartPreviousClose: number;
-  regularMarketDayHigh: number;
-  regularMarketDayLow: number;
-  regularMarketTime: number;
-}
-
-interface YahooChartResponse {
-  chart: {
-    result: Array<{ meta: YahooMeta }> | null;
-    error: { code: string; description: string } | null;
-  };
+// .T suffix → stooq symbol (e.g. 7203.T → 7203.jp)
+function toStooqSymbol(symbol: string): string {
+  return symbol.replace(/\.T$/i, ".jp").toLowerCase();
 }
 
 export async function fetchJpStockQuote(item: WatchlistItem): Promise<StockQuote> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${item.symbol}?interval=1d&range=1d`;
+  const stooqSymbol = toStooqSymbol(item.symbol);
+  const url = `https://stooq.com/q/l/?s=${stooqSymbol}&f=sd2t2ohlcv&h&e=csv`;
 
-  const res = await fetch(url, {
-    next: { revalidate: 60 },
-    headers: { "User-Agent": "Mozilla/5.0" },
-  });
+  const res = await fetch(url, { next: { revalidate: 60 } });
 
   if (!res.ok) {
-    throw new Error(`Yahoo Finance APIエラー: ${res.status} (${item.symbol})`);
+    throw new Error(`stooq APIエラー: ${res.status} (${item.symbol})`);
   }
 
-  const data: YahooChartResponse = await res.json();
+  const text = await res.text();
+  const lines = text.trim().split("\n");
 
-  if (data.chart.error || !data.chart.result?.[0]) {
-    throw new Error(
-      data.chart.error?.description ?? `"${item.symbol}" のデータが見つかりません`
-    );
+  // lines[0] = header, lines[1] = data
+  if (lines.length < 2) {
+    throw new Error(`"${item.symbol}" のデータが見つかりません`);
   }
 
-  const meta = data.chart.result[0].meta;
-  const price = meta.regularMarketPrice;
-  const prevClose = meta.chartPreviousClose;
-  const change = price - prevClose;
-  const changePercent = prevClose !== 0 ? (change / prevClose) * 100 : 0;
+  const cols = lines[1].split(",");
+  // Symbol,Date,Time,Open,High,Low,Close,Volume
+  const [, date, time, open, high, low, close] = cols;
+
+  const price = parseFloat(close);
+  const openVal = parseFloat(open);
+
+  if (isNaN(price)) {
+    throw new Error(`"${item.symbol}" のデータが不正です`);
+  }
+
+  const change = price - openVal;
+  const changePercent = openVal !== 0 ? (change / openVal) * 100 : 0;
+  const updatedAt = date && time ? new Date(`${date}T${time}+09:00`).toISOString() : null;
 
   return {
     symbol: item.symbol,
@@ -48,9 +45,9 @@ export async function fetchJpStockQuote(item: WatchlistItem): Promise<StockQuote
     price,
     change,
     changePercent,
-    high: meta.regularMarketDayHigh,
-    low: meta.regularMarketDayLow,
-    prevClose,
-    updatedAt: new Date(meta.regularMarketTime * 1000).toISOString(),
+    high: parseFloat(high),
+    low: parseFloat(low),
+    prevClose: openVal,
+    updatedAt,
   };
 }
