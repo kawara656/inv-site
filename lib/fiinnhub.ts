@@ -1,4 +1,5 @@
 import type { FinnhubQuote, StockQuote, WatchlistItem } from "@/types/stock";
+import { fetchJpStockQuote } from "@/lib/yahoo";
 
 const FINNHUB_BASE_URL = "https://finnhub.io/api/v1";
 
@@ -31,19 +32,23 @@ export async function fetchUsStockQuote(symbol: string): Promise<FinnhubQuote> {
 
 export async function resolveStockQuote(item: WatchlistItem): Promise<StockQuote> {
   if (item.market === "JP") {
-    return {
-      symbol: item.symbol,
-      name: item.name,
-      market: "JP",
-      price: null,
-      change: null,
-      changePercent: null,
-      high: null,
-      low: null,
-      prevClose: null,
-      updatedAt: null,
-      error: "日本株はデータ取得に未対応",
-    };
+    try {
+      return await fetchJpStockQuote(item);
+    } catch (err) {
+      return {
+        symbol: item.symbol,
+        name: item.name,
+        market: "JP",
+        price: null,
+        change: null,
+        changePercent: null,
+        high: null,
+        low: null,
+        prevClose: null,
+        updatedAt: null,
+        error: err instanceof Error ? err.message : "不明なエラー",
+      };
+    }
   }
 
   try {
